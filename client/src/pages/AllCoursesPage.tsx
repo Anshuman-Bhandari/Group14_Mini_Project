@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -12,19 +12,21 @@ import {
   Sparkles,
 } from "lucide-react";
 import CourseCardGrid from "../components/CourseCardGrid";
+import api from "../api/axios";
+ 
+// Fallback hardcoded data
 import {
-  recommendedCourses,
-  enrolledCourses,
-  exploreCourses,
-  trendingCourses,
+  recommendedCourses as hardcodedRecommended,
+  enrolledCourses as hardcodedEnrolled,
+  exploreCourses as hardcodedExplore,
+  trendingCourses as hardcodedTrending,
 } from "../data/courses";
-
+ 
 import type { Course, CourseLevel } from "../data/courses";
-
-
+ 
 // ── Section config ────────────────────────────────────────────────────────────
 type SectionKey = "recommended" | "enrolled" | "explore" | "trending";
-
+ 
 interface SectionConfig {
   title: string;
   subtitle: string;
@@ -37,72 +39,43 @@ interface SectionConfig {
   icon: React.ReactNode;
   gradient: string;
 }
-
-const SECTION_MAP: Record<SectionKey, SectionConfig> = {
-  recommended: {
-    title: "Recommended for You",
-    subtitle: "Curated based on your interests and learning history",
-    courses: recommendedCourses,
-    showProgress: false,
-    accent: "violet",
-    accentBg: "bg-violet-50",
-    accentText: "text-violet-600",
-    accentBorder: "border-violet-200",
-    icon: <Sparkles size={20} />,
-    gradient: "from-violet-600 via-indigo-600 to-blue-700",
-  },
-  enrolled: {
-    title: "Continue Learning",
-    subtitle: "Pick up where you left off",
-    courses: enrolledCourses,
-    showProgress: true,
-    accent: "indigo",
-    accentBg: "bg-indigo-50",
-    accentText: "text-indigo-600",
-    accentBorder: "border-indigo-200",
-    icon: <BookOpen size={20} />,
-    gradient: "from-indigo-600 via-blue-600 to-cyan-600",
-  },
-  explore: {
-    title: "Explore New Topics",
-    subtitle: "Discover something outside your comfort zone",
-    courses: exploreCourses,
-    showProgress: false,
-    accent: "emerald",
-    accentBg: "bg-emerald-50",
-    accentText: "text-emerald-600",
-    accentBorder: "border-emerald-200",
-    icon: <Compass size={20} />,
-    gradient: "from-emerald-600 via-teal-600 to-cyan-600",
-  },
-  trending: {
-    title: "Trending Right Now",
-    subtitle: "What thousands of learners are signing up for this week",
-    courses: trendingCourses,
-    showProgress: false,
-    accent: "rose",
-    accentBg: "bg-rose-50",
-    accentText: "text-rose-600",
-    accentBorder: "border-rose-200",
-    icon: <TrendingUp size={20} />,
-    gradient: "from-rose-600 via-pink-600 to-fuchsia-600",
-  },
-};
-
+ 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type SortOption = "popular" | "rating" | "newest" | "price-low" | "price-high" | "duration";
-
+ 
 interface Filters {
   levels: CourseLevel[];
   categories: string[];
   priceRange: "all" | "free" | "paid";
   minRating: number;
 }
-
+ 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const isSectionKey = (key: string | undefined): key is SectionKey =>
   ["recommended", "enrolled", "explore", "trending"].includes(key ?? "");
-
+ 
+// Helper to map backend course to frontend Course interface
+const mapCourse = (backendCourse: any): Course => {
+  return {
+    id: String(backendCourse.id),
+    title: backendCourse.title,
+    instructor: backendCourse.instructor?.name || "Unknown Instructor",
+    instructor_bio: backendCourse.instructor?.bio,
+    instructor_avatar: backendCourse.instructor?.avatar,
+    thumbnail_url: backendCourse.thumbnailUrl || "https://picsum.photos/seed/default/800/450",
+    price: parseFloat(backendCourse.price),
+    average_rating: 4.5, // Mocked for now
+    total_enrollments: backendCourse.enrollments?.length || 0,
+    level: backendCourse.level || "BEGINNER",
+    estimated_duration_minutes: backendCourse.duration || 600,
+    short_description: backendCourse.description?.substring(0, 100) + "...",
+    description: backendCourse.description,
+    language: backendCourse.language || "English",
+    category: backendCourse.category?.name || "General",
+    progress: backendCourse.enrollmentProgress,
+  };
+};
+ 
 // ── Sub-components ────────────────────────────────────────────────────────────
 const SortSelect: React.FC<{ value: SortOption; onChange: (v: SortOption) => void; accentText: string }> = ({
   value,
@@ -117,7 +90,7 @@ const SortSelect: React.FC<{ value: SortOption; onChange: (v: SortOption) => voi
     { value: "price-high", label: "Price: High to Low" },
     { value: "duration", label: "Shortest First" },
   ];
-
+ 
   return (
     <div className="relative">
       <select
@@ -135,15 +108,19 @@ const SortSelect: React.FC<{ value: SortOption; onChange: (v: SortOption) => voi
     </div>
   );
 };
-
+ 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 const AllCoursesPage: React.FC = () => {
   const { section } = useParams<{ section: string }>();
   const navigate = useNavigate();
-
+ 
   const sectionKey = isSectionKey(section) ? section : "recommended";
-  const config = SECTION_MAP[sectionKey];
-
+ 
+  // State for dynamic courses
+  const [enrolledCourses, setEnrolledCourses] = useState<Course[]>(hardcodedEnrolled);
+  const [publishedCourses, setPublishedCourses] = useState<Course[]>(hardcodedRecommended); // fallback
+  const [isLoading, setIsLoading] = useState(true);
+ 
   const [search, setSearch] = useState<string>("");
   const [sort, setSort] = useState<SortOption>("popular");
   const [filters, setFilters] = useState<Filters>({
@@ -153,17 +130,105 @@ const AllCoursesPage: React.FC = () => {
     minRating: 0,
   });
   const [showFilters, setShowFilters] = useState<boolean>(false);
-
+ 
+  useEffect(() => {
+    const fetchCourses = async () => {
+      try {
+        // Fetch enrolled courses
+        const enrollmentsRes = await api.get('/enrollments');
+        const enrollmentsData = enrollmentsRes.data || [];
+        const mappedEnrolled = enrollmentsData.map((e: any) => {
+           const c = mapCourse(e.course);
+           c.progress = e.progress || 0;
+           return c;
+        });
+       
+        // Fetch all published courses
+        const coursesRes = await api.get('/courses/published');
+        const mappedCourses = (coursesRes.data || []).map(mapCourse);
+ 
+        // If backend returns data, override the defaults
+        if (mappedEnrolled.length > 0 || enrollmentsData.length === 0) { // respect empty array if actually nothing enrolled
+            setEnrolledCourses(mappedEnrolled);
+        }
+        if (mappedCourses.length > 0) {
+            setPublishedCourses(mappedCourses);
+        }
+ 
+      } catch (err) {
+        console.error("Failed to load courses data", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchCourses();
+  }, []);
+ 
+  const SECTION_MAP = useMemo<Record<SectionKey, SectionConfig>>(() => ({
+    recommended: {
+      title: "Recommended for You",
+      subtitle: "Curated based on your interests and learning history",
+      courses: publishedCourses.length > 0 ? publishedCourses : hardcodedRecommended,
+      showProgress: false,
+      accent: "violet",
+      accentBg: "bg-violet-50",
+      accentText: "text-violet-600",
+      accentBorder: "border-violet-200",
+      icon: <Sparkles size={20} />,
+      gradient: "from-violet-600 via-indigo-600 to-blue-700",
+    },
+    enrolled: {
+      title: "Continue Learning",
+      subtitle: "Pick up where you left off",
+      // Only strictly fallback to hardcoded if we are somehow failing to get actual enrolled
+      // But we initialized state with hardcodedEnrolled, and overwrite it on fetch success.
+      courses: enrolledCourses,
+      showProgress: true,
+      accent: "indigo",
+      accentBg: "bg-indigo-50",
+      accentText: "text-indigo-600",
+      accentBorder: "border-indigo-200",
+      icon: <BookOpen size={20} />,
+      gradient: "from-indigo-600 via-blue-600 to-cyan-600",
+    },
+    explore: {
+      title: "Explore New Topics",
+      subtitle: "Discover something outside your comfort zone",
+      courses: publishedCourses.length > 0 ? publishedCourses : hardcodedExplore,
+      showProgress: false,
+      accent: "emerald",
+      accentBg: "bg-emerald-50",
+      accentText: "text-emerald-600",
+      accentBorder: "border-emerald-200",
+      icon: <Compass size={20} />,
+      gradient: "from-emerald-600 via-teal-600 to-cyan-600",
+    },
+    trending: {
+      title: "Trending Right Now",
+      subtitle: "What thousands of learners are signing up for this week",
+      courses: publishedCourses.length > 0 ? publishedCourses : hardcodedTrending,
+      showProgress: false,
+      accent: "rose",
+      accentBg: "bg-rose-50",
+      accentText: "text-rose-600",
+      accentBorder: "border-rose-200",
+      icon: <TrendingUp size={20} />,
+      gradient: "from-rose-600 via-pink-600 to-fuchsia-600",
+    },
+  }), [publishedCourses, enrolledCourses]);
+ 
+  const config = SECTION_MAP[sectionKey];
+ 
   // Derive unique categories from this section's courses
   const allCategories = useMemo(
     () => Array.from(new Set(config.courses.map((c) => c.category))).sort(),
     [config.courses]
   );
-
+ 
   // Filter
   const filtered = useMemo(() => {
     let result = [...config.courses];
-
+ 
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -174,25 +239,25 @@ const AllCoursesPage: React.FC = () => {
           c.short_description.toLowerCase().includes(q)
       );
     }
-
+ 
     if (filters.levels.length > 0) {
       result = result.filter((c) => filters.levels.includes(c.level));
     }
-
+ 
     if (filters.categories.length > 0) {
       result = result.filter((c) => filters.categories.includes(c.category));
     }
-
+ 
     if (filters.priceRange === "free") result = result.filter((c) => c.price === 0);
     if (filters.priceRange === "paid") result = result.filter((c) => c.price > 0);
-
+ 
     if (filters.minRating > 0) {
       result = result.filter((c) => c.average_rating >= filters.minRating);
     }
-
+ 
     return result;
   }, [config.courses, search, filters]);
-
+ 
   // Sort
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -206,14 +271,14 @@ const AllCoursesPage: React.FC = () => {
       default: return arr;
     }
   }, [filtered, sort]);
-
+ 
   const toggleLevel = (level: CourseLevel) => {
     setFilters((f) => ({
       ...f,
       levels: f.levels.includes(level) ? f.levels.filter((l) => l !== level) : [...f.levels, level],
     }));
   };
-
+ 
   const toggleCategory = (cat: string) => {
     setFilters((f) => ({
       ...f,
@@ -222,32 +287,40 @@ const AllCoursesPage: React.FC = () => {
         : [...f.categories, cat],
     }));
   };
-
+ 
   const clearFilters = () => {
     setFilters({ levels: [], categories: [], priceRange: "all", minRating: 0 });
     setSearch("");
   };
-
+ 
   const activeFilterCount =
     filters.levels.length +
     filters.categories.length +
     (filters.priceRange !== "all" ? 1 : 0) +
     (filters.minRating > 0 ? 1 : 0);
-
+ 
   const LEVELS: CourseLevel[] = ["BEGINNER", "INTERMEDIATE", "ADVANCED"];
   const LEVEL_COLORS: Record<CourseLevel, string> = {
     BEGINNER: "bg-emerald-100 text-emerald-700 border-emerald-200",
     INTERMEDIATE: "bg-amber-100 text-amber-700 border-amber-200",
     ADVANCED: "bg-rose-100 text-rose-700 border-rose-200",
   };
-
+ 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
+      </div>
+    );
+  }
+ 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
       {/* ── Hero Banner ─────────────────────────────────────────────────────── */}
       <div className={`bg-gradient-to-br ${config.gradient} relative overflow-hidden`}>
         <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-white/5 pointer-events-none" />
         <div className="absolute bottom-0 left-1/3 w-48 h-48 rounded-full bg-white/5 pointer-events-none" />
-
+ 
         <div className="w-full px-4 sm:px-6 lg:px-8 py-10 relative z-10">
           {/* Back button */}
           <button
@@ -257,7 +330,7 @@ const AllCoursesPage: React.FC = () => {
             <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
             Back to Home
           </button>
-
+ 
           {/* Banner content - flex row to align title/subtitle left and search right */}
           <div className="flex items-center justify-between gap-8">
             {/* Left side - Title and Subtitle */}
@@ -270,7 +343,7 @@ const AllCoursesPage: React.FC = () => {
               </div>
               <p className="text-white/70 text-sm ml-[52px]">{config.subtitle}</p>
             </div>
-
+ 
             {/* Right side - Search bar */}
             <div className="relative max-w-md flex-shrink-0 w-full">
               <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -290,7 +363,7 @@ const AllCoursesPage: React.FC = () => {
           </div>
         </div>
       </div>
-
+ 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
         {/* Toolbar */}
@@ -310,7 +383,7 @@ const AllCoursesPage: React.FC = () => {
               </button>
             )}
           </div>
-
+ 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -328,11 +401,11 @@ const AllCoursesPage: React.FC = () => {
                 </span>
               )}
             </button>
-
+ 
             <SortSelect value={sort} onChange={setSort} accentText={config.accentText} />
           </div>
         </div>
-
+ 
         {/* Filter Panel */}
         {showFilters && (
           <div className={`mb-6 p-5 rounded-2xl border ${config.accentBorder} ${config.accentBg} transition-all`}>
@@ -356,7 +429,7 @@ const AllCoursesPage: React.FC = () => {
                   ))}
                 </div>
               </div>
-
+ 
               {/* Price */}
               <div>
                 <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">Price</p>
@@ -376,7 +449,7 @@ const AllCoursesPage: React.FC = () => {
                   ))}
                 </div>
               </div>
-
+ 
               {/* Min Rating */}
               <div>
                 <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">Min Rating</p>
@@ -397,7 +470,7 @@ const AllCoursesPage: React.FC = () => {
                 </div>
               </div>
             </div>
-
+ 
             {/* Categories */}
             {allCategories.length > 1 && (
               <div className="mt-5 pt-5 border-t border-white/60">
@@ -421,7 +494,7 @@ const AllCoursesPage: React.FC = () => {
             )}
           </div>
         )}
-
+ 
         {/* Grid */}
         {sorted.length > 0 ? (
           <div className="max-w-7xl mx-auto">
@@ -458,5 +531,5 @@ const AllCoursesPage: React.FC = () => {
     </div>
   );
 };
-
+ 
 export default AllCoursesPage;
