@@ -34,6 +34,15 @@ function AppContent() {
   const isAdminRoute = location.pathname.startsWith('/admin');
 
   return (
+    <BrowserRouter>
+      <Navbar onMenuClick={() => setSidebarOpen(true)} />
+      {isLoggedIn && <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} isLoggedIn={isLoggedIn} />}
+
+      <main>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/userLogin" element={<UserLogin />} />
+          <Route path="/userRegister" element={<UserRegister />} />
     <>
       {!isAdminRoute && <Navbar onMenuClick={() => setSidebarOpen(true)} />}
       {!isAdminRoute && <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} isLoggedIn={isLoggedIn} />}
@@ -48,7 +57,6 @@ function AppContent() {
 
           {/* ── Protected: requires valid token ── */}
           <Route element={<ProtectedRoutes />}>
-            <Route path="/" element={<HomePage />} />
             <Route path="/user/profile/:id" element={<ProfilePage />} />
             <Route path="/courses/:section" element={<AllCoursesPage />} />
             <Route path="/course/:id" element={<CourseDetailPage />} />
@@ -56,8 +64,12 @@ function AppContent() {
             <Route path="/instructor/createCourse" element={<CreateCoursePage />} />
             <Route path="/instructor/createQuiz" element={<CreateQuizPage />} />
             <Route path="/instructor/editCourse/:id" element={<CreateCoursePage />} />
+            <Route path="/instructor/editQuiz/:id" element={<CreateQuizPage />} />
           </Route>
 
+          <Route path="/courses/:section" element={<AllCoursesPage />} />
+          <Route path="/course/:id" element={<CourseDetailPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
           {/* ── Admin: requires token + ADMIN role ── */}
           <Route path="/admin" element={<AdminProtectedRoutes />}>
             <Route index element={<Navigate to="dashboard" replace />} />
