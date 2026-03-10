@@ -11,14 +11,14 @@ terraform {
 provider "azurerm" {
   resource_provider_registrations = "none" # This is only required when the User, Service Principal, or Identity running Terraform lacks the permissions to register Azure Resource Providers.
   features {}
-  subscription_id = "4e21bf58-c7fe-4851-8d76-e1459af1a7b3"
+  subscription_id = "b0005a4d-1791-43c8-930f-538759929700"
 }
 
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_resource_group" "rg" {
-  name     = "my-infra-rg"
-  location = "East US"
+  name     = "less-go"
+  location = "central india"
 }
 
 # --- Networking ---
